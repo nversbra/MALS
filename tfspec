@@ -1,0 +1,6 @@
+nassim:mini:8://anaconda/envs/ASS/bin/python:ps
+nversbra:ubuntu:8:/home/nversbra/anaconda3/envs/ASS/bin/python
+nversbra:c1:16:/home/nversbra/anaconda3/envs/ASS/bin/python
+nversbra:c2:16:/home/nversbra/anaconda3/envs/ASS/bin/python
+nversbra:c3:16:/home/nversbra/anaconda3/envs/ASS/bin/python
+nversbra:c4:16:/home/nversbra/anaconda3/envs/ASS/bin/python

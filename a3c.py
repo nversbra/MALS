@@ -1,4 +1,6 @@
 from __future__ import print_function
+
+import random
 from collections import namedtuple
 import numpy as np
 import tensorflow as tf
@@ -7,6 +9,7 @@ import six.moves.queue as queue
 import scipy.signal
 import threading
 import distutils.version
+from replay_memory import ReplayMemory
 use_tf12_api = distutils.version.LooseVersion(tf.VERSION) >= distutils.version.LooseVersion('0.12.0')
 
 def discount(x, gamma):
@@ -71,7 +74,7 @@ One of the key distinctions between a normal environment and a universe environm
 is that a universe environment is _real time_.  This means that there should be a thread
 that would constantly interact with the environment and tell it what to do.  This thread is here.
 """
-    def __init__(self, env, policy, num_local_steps, visualise):
+    def __init__(self, env, policy, num_local_steps, visualise, memory):
         threading.Thread.__init__(self)
         self.queue = queue.Queue(5)
         self.num_local_steps = num_local_steps
@@ -82,6 +85,7 @@ that would constantly interact with the environment and tell it what to do.  Thi
         self.sess = None
         self.summary_writer = None
         self.visualise = visualise
+        self.memory = memory
 
     def start_runner(self, sess, summary_writer):
         self.sess = sess
@@ -93,7 +97,7 @@ that would constantly interact with the environment and tell it what to do.  Thi
             self._run()
 
     def _run(self):
-        rollout_provider = env_runner(self.env, self.policy, self.num_local_steps, self.summary_writer, self.visualise)
+        rollout_provider = env_runner(self.env, self.policy, self.num_local_steps, self.summary_writer, self.visualise, self.memory)
         while True:
             # the timeout variable exists because apparently, if one worker dies, the other workers
             # won't die with it, unless the timeout is set to some large number.  This is an empirical
@@ -103,7 +107,7 @@ that would constantly interact with the environment and tell it what to do.  Thi
 
 
 
-def env_runner(env, policy, num_local_steps, summary_writer, render):
+def env_runner(env, policy, num_local_steps, summary_writer, render, memory):
     """
 The logic of the thread runner.  In brief, it constantly keeps on running
 the policy, and as long as the rollout exceeds a certain length, the thread
@@ -118,13 +122,19 @@ runner appends the policy to the queue.
         terminal_end = False
         rollout = PartialRollout()
 
-        for _ in range(num_local_steps):
+        for i in range(num_local_steps):
             fetched = policy.act(last_state, *last_features)
             action, value_, features = fetched[0], fetched[1], fetched[2:]
             # argmax to convert from one-hot
             state, reward, terminal, info = env.step(action.argmax())
+            #HIER toevoegen; self.history.add(screen)                 ---------------------!------!--------!-------!-------!---!---!-!-!-!
+
             if render:
                 env.render()
+
+
+            #if (i%10 == 0):
+            #    s_t, action, reward, s_t_plus_1, terminal = memory.sample()
 
             # collect the experience
             rollout.add(last_state, action, reward, value_, terminal, last_features)
@@ -156,6 +166,7 @@ runner appends the policy to the queue.
             rollout.r = policy.value(last_state, *last_features)
 
         # once we have enough experience, yield it, and have the ThreadRunner place it on a queue
+        memory.add(rollout)
         yield rollout
 
 class A3C(object):
@@ -169,6 +180,8 @@ should be computed.
 
         self.env = env
         self.task = task
+        memory = ReplayMemory()
+        self.memory = memory
         worker_device = "/job:worker/task:{}/cpu:0".format(task)
         with tf.device(tf.train.replica_device_setter(1, worker_device=worker_device)):
             with tf.variable_scope("global"):
@@ -206,7 +219,7 @@ should be computed.
             # on the one hand;  but on the other hand, we get less frequent parameter updates, which
             # slows down learning.  In this code, we found that making local steps be much
             # smaller than 20 makes the algorithm more difficult to tune and to get to work.
-            self.runner = RunnerThread(env, pi, 20, visualise)
+            self.runner = RunnerThread(env, pi, 20, visualise, memory)
 
 
             grads = tf.gradients(self.loss, pi.var_list)
@@ -267,7 +280,13 @@ server.
 """
 
         sess.run(self.sync)  # copy weights from shared to local
-        rollout = self.pull_batch_from_queue()
+
+        replay = random.randint(0, 10)
+        if (replay > 1):
+            rollout = self.pull_batch_from_queue()
+        else:
+            rollout = self.memory.sample()
+
         batch = process_rollout(rollout, gamma=0.99, lambda_=1.0)
 
         should_compute_summary = self.task == 0 and self.local_steps % 11 == 0
