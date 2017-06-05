@@ -128,8 +128,8 @@ Setting up Tensorflow for data parallel work
                         help="Visualise the gym environment by running env.render() between each timestep")
 
     args = parser.parse_args()
-    spec = cluster_spec(args.num_workers, 1)
-    cluster = tf.train.ClusterSpec(spec).as_cluster_def()
+    cluster_dict = create_cluster_dict(os.environ["HOME"]+args.cluster_spec, args.start_port)
+    cluster = tf.train.ClusterSpec(cluster_dict)
 
     def shutdown(signal, frame):
         logger.warn('Received signal %s: exiting', signal)
